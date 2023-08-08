@@ -1,0 +1,325 @@
+#importing dataset from kaggle
+!mkdir -p ~/.kaggle
+!cp kaggle.json ~/.kaggle/
+#downloading dataset from kaggle
+!kaggle datasets download -d fanconic/skin-cancer-malignant-vs-benign
+#extracting dataset from zip file by unzipping
+import zipfile
+a = zipfile.ZipFile('/content/skin-cancer-malignant-vs-benign.zip','r')
+a.extractall('/content')
+a.close()
+#importing libraries
+#numpy for arrays
+import numpy as np 
+#pandas for data analaysis
+import pandas as pd
+#os for directories
+import os
+#matplot for displaying images and plotting images
+import matplotlib.pyplot as plt
+import seaborn as sns
+#glob is used for files and determing path
+from glob import glob
+#random seed to generate random values. Sending images to training
+np.random.seed(21)
+from PIL import Image
+#load the training and testing files
+directory_benign_train = '/content/train/benign'
+directory_malignant_train = '/content/train/malignant'
+directory_benign_test = '/content/test/benign'
+directory_malignant_test = '/content/test/malignant'
+read = lambda imname: np.asarray(Image.open(imname).convert('RGB').resize((32,32)))
+
+#reading files
+img_benign_train = [read(os.path.join(directory_benign_train, filename)) for filename in os.listdir(directory_benign_train)]
+img_malignant_train = [read(os.path.join(directory_malignant_train, filename)) for filename in os.listdir(directory_malignant_train)]
+
+
+img_benign_test = [read(os.path.join(directory_benign_test, filename)) for filename in os.listdir(directory_benign_test)]
+img_malignant_test = [read(os.path.join(directory_malignant_test, filename)) for filename in os.listdir(directory_malignant_test)]
+
+type(img_benign_train)
+#converting images to arrays of unsigned 8 bit integer
+X_benign_train = np.array(img_benign_train, dtype='uint8')
+X_malignant_train = np.array(img_malignant_train, dtype='uint8')
+
+X_benign_test = np.array(img_benign_test, dtype='uint8')
+X_malignant_test = np.array(img_malignant_test, dtype='uint8')
+
+type(X_benign_train)
+#labeling dieases as 1 or 0
+y_benign_train = np.zeros(X_benign_train.shape[0])
+y_malignant_train = np.ones(X_malignant_train.shape[0])
+
+y_benign_test = np.zeros(X_benign_test.shape[0])
+y_malignant_test = np.ones(X_malignant_test.shape[0])
+
+y_malignant_train
+#combiining all images
+X_train = np.concatenate((X_benign_train, X_malignant_train), axis=0) 
+y_train = np.concatenate((y_benign_train, y_malignant_train), axis=0)
+
+X_test = np.concatenate((X_benign_test, X_malignant_test), axis=0)
+y_test = np.concatenate((y_benign_test, y_malignant_test), axis=0)
+
+print("Shape of X_train: ", X_train.shape) 
+print("Shape of y_train: ", y_train.shape)
+print("Shape of X_test: ", X_test.shape)
+print("Shape of y_test: ", y_test.shape)
+
+y_test
+#randomly shuffling all the images 
+s1 = np.arange(X_train.shape[0])
+np.random.shuffle(s1)
+X_train = X_train[s1]
+y_train = y_train[s1]
+
+s2 = np.arange(X_test.shape[0])
+np.random.shuffle(s2)
+X_test = X_test[s2]
+y_test = y_test[s2]
+print(X_train)
+print("Shuffle orders example: ", s1)
+
+#displaying images using matplot
+fig = plt.figure(figsize=(12,8))
+columns = 5
+rows = 3
+
+for i in range(1, columns*rows+1):
+    ax = fig.add_subplot(rows, columns, i)
+    if y_train[i] == 0:
+        ax.title.set_text('Benign')
+    else:
+        ax.title.set_text('Malignant')
+    plt.imshow(X_train[i], interpolation='nearest')
+plt.show()
+
+#changing the images arrays into 2D arrays for better classification
+import keras
+from keras.utils.np_utils import to_categorical 
+
+y_train = to_categorical(y_train, num_classes=2)
+y_test = to_categorical(y_test, num_classes=2)
+
+type(y_train)
+
+y_train
+
+#resizing
+X_train = X_train/255
+X_test = X_test/255
+
+#applying CNN model
+from keras.models import Sequential, Model
+from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPool2D
+from keras.optimizers import Adam, RMSprop
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+def build_cnn_model(input_shape = (32, 32, 3), num_classes=2):
+    model = Sequential()
+  
+    model.add(Conv2D(64, kernel_size=(3,3), padding='Same', input_shape = input_shape, activation='relu', kernel_initializer = 'glorot_uniform'))
+    model.add(MaxPool2D(pool_size = (2,2)))
+    model.add(Dropout(0.25)) 
+    
+    
+    model.add(Conv2D(64, kernel_size=(3,3), padding='Same', activation='relu', kernel_initializer = 'glorot_uniform'))
+    model.add(MaxPool2D(pool_size=(2,2)))
+    model.add(Dropout(0.25))
+    
+    
+    model.add(Flatten())
+    
+    model.add(Dense(128, activation='relu', kernel_initializer='normal'))
+    model.add(Dense(128, activation='relu', kernel_initializer='normal'))
+    
+    model.add(Dense(num_classes, activation = 'softmax'))
+    model.summary()
+    optimizer= Adam(lr=0.001) 
+    
+    model.compile(optimizer = optimizer, loss='binary_crossentropy', metrics=["accuracy"])
+    
+    return model   
+model_cnn = build_cnn_model()
+
+from keras.callbacks import ReduceLROnPlateau
+learning_rate_annealer = ReduceLROnPlateau(monitor='val_acc',mode='max',
+                                          patience=3,
+                                          verbose=1,
+                                          factor=0.5,
+                                          min_lr = 1e-4)
+
+
+history = model_cnn.fit(X_train, 
+                    y_train, 
+                    validation_split=0.2, 
+                    epochs=50, 
+                    batch_size = 64, 
+                    verbose=1,
+                    callbacks=[learning_rate_annealer],validation_data=(X_test,y_test))
+
+
+
+print(history.history.keys())
+
+#plotting acuracy and loss
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+
+plt.title('Model Accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epochs')
+
+plt.legend(['Train', 'Val'], loc='upper left')
+plt.show()
+
+
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epochs')
+
+plt.legend(['Train', 'Val'], loc='upper left')
+plt.show()
+
+!pip install keras_efficientnets
+!pip install keras_applications
+import keras_applications
+from keras_efficientnets import EfficientNetB5
+base_model = EfficientNetB5(include_top=False, weights="imagenet", input_shape=(32,32,3),classes=y_train.shape[1])
+from keras.models import Sequential, Model
+from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPool2D
+from keras.optimizers import Adam, RMSprop
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+def build_cnn_model(input_shape = (32, 32, 3), num_classes=2):
+    model = Sequential()
+    model.add(base_model) 
+    model.add(Flatten())
+    
+    model.add(Dense(128, activation='relu', kernel_initializer='normal'))
+    model.add(Dense(128, activation='relu', kernel_initializer='normal'))
+    
+    model.add(Dense(2, activation = 'softmax'))
+    model.summary()
+    optimizer= Adam(lr=0.001) 
+    
+    model.compile(optimizer = optimizer, loss='binary_crossentropy', metrics=["accuracy"])
+    
+    return model
+model_cnn = build_cnn_model()
+from keras.callbacks import ReduceLROnPlateau
+learning_rate_annealer = ReduceLROnPlateau(monitor='val_acc',mode='max',
+                                          patience=3,
+                                          verbose=1,
+                                          factor=0.5,
+                                          min_lr = 1e-4)
+
+
+history = model_cnn .fit(X_train, 
+                    y_train, 
+                    validation_split=0.2, 
+                    epochs=50, 
+                    batch_size = 64, 
+                    verbose=1,
+                    callbacks=[learning_rate_annealer],validation_data=(X_test,y_test))
+
+
+
+print(history.history.keys())
+
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+
+plt.title('Model Accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epochs')
+
+plt.legend(['Train', 'Val'], loc='upper left')
+plt.show()
+
+
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epochs')
+
+plt.legend(['Train', 'Val'], loc='upper left')
+plt.show()
+
+import tensorflow as tf
+tf.keras.utils.plot_model(model_cnn)
+
+import numpy as np
+import matplotlib.pyplot as plt
+ 
+  
+# creating the dataset
+data = { 'CNN ':98 , 'EfficientNET':99}
+courses = list(data.keys())
+values = list(data.values())
+  
+fig = plt.figure(figsize = (10, 5))
+ 
+# creating the bar plot
+plt.bar(courses, values, color ='orange',
+        width = 0.4)
+ 
+plt.xlabel("Architectures used")
+plt.ylabel("Accuracy")
+plt.title("Accuracies of different Methods  in train data")
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+ 
+  
+# creating the dataset
+data = { 'CNN ':75,  'EfficientNET ':79}
+courses = list(data.keys())
+values = list(data.values())
+  
+fig = plt.figure(figsize = (10, 5))
+ 
+# creating the bar plot
+plt.bar(courses, values, color ='orange',
+        width = 0.4)
+ 
+plt.xlabel("Architectures used")
+plt.ylabel("Accuracy")
+plt.title("Accuracies of different Methods  in test data")
+plt.show()
+
+import cv2
+a=cv2.imread('/content/m.jpeg')
+#shape of input image
+a.shape
+
+#reading image
+import tensorflow as tf
+from tensorflow.keras.applications.resnet50 import preprocess_input, decode_predictions
+from tensorflow.keras.preprocessing import image
+img = image.load_img('/content/m.jpeg', target_size=(32, 32))
+
+#converting predicting image to numpy array
+img_array = image.img_to_array(img)
+#print(img_array)
+#filling the dimensions which are empty
+img_batch = np.expand_dims(img_array, axis=0)
+print(img_batch)
+
+#highlighing the image details by converting RGB TO BGR
+img_preprocessed = preprocess_input(img_batch)
+print(img_preprocessed)
+a=history.model.predict(img_preprocessed)
+print(a)
+
+def classify(a):
+  if (a[0][0]==1 and a[0][1]==0):  
+    print("benign")
+  else:
+    print("malignant")
+
+print(classify(a))
